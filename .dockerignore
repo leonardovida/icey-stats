@@ -1,0 +1,4 @@
+*
+!requirements.lock
+!src/icey_stats/**
+**/__pycache__

@@ -1,0 +1,69 @@
+# Dokploy raw Compose stack for icey-stats. scripts/deploy.py uploads this file and sets:
+#   ICEY_STATS_IMAGE         immutable image built on the server (icey-stats:<commit>)
+#   ICEY_STATS_HOST          public hostname routed by Traefik
+#   ICEY_STATS_INGEST_TOKEN  bearer token for POST /v1/github (generated once, kept in Dokploy)
+name: icey-stats
+services:
+  icey-stats:
+    image: ${ICEY_STATS_IMAGE:?Set ICEY_STATS_IMAGE to an immutable release image}
+    restart: unless-stopped
+    init: true
+    # "strict" profile (vps-ops config/apps.tsv): non-root, no capabilities, no privilege escalation, limits.
+    user: "10001:10001"
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777,noexec,nosuid,nodev
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 256m
+    memswap_limit: 256m
+    cpus: 0.5
+    pids_limit: 128
+    # Room for the graceful shutdown: drain requests, write the final backup, close DuckDB.
+    stop_grace_period: 30s
+    # Only the public listener. The admin listener binds 127.0.0.1:8081 inside the container.
+    expose:
+      - "8080"
+    environment:
+      ICEY_STATS_INGEST_TOKEN: ${ICEY_STATS_INGEST_TOKEN:?Set ICEY_STATS_INGEST_TOKEN}
+      ICEY_STATS_DB_PATH: /data/icey-stats.duckdb
+    volumes:
+      - data:/data
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - dokploy-network
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: dokploy-network
+      traefik.http.routers.icey-stats-http.rule: Host(`${ICEY_STATS_HOST:?Set ICEY_STATS_HOST}`)
+      traefik.http.routers.icey-stats-http.entrypoints: web
+      traefik.http.routers.icey-stats-http.middlewares: icey-stats-https
+      traefik.http.middlewares.icey-stats-https.redirectscheme.scheme: https
+      traefik.http.middlewares.icey-stats-https.redirectscheme.permanent: "true"
+      traefik.http.routers.icey-stats.rule: Host(`${ICEY_STATS_HOST:?Set ICEY_STATS_HOST}`)
+      traefik.http.routers.icey-stats.entrypoints: websecure
+      traefik.http.routers.icey-stats.tls.certresolver: letsencrypt
+      traefik.http.routers.icey-stats.middlewares: icey-stats-rate,icey-stats-body
+      traefik.http.routers.icey-stats.service: icey-stats
+      traefik.http.services.icey-stats.loadbalancer.server.port: "8080"
+      # Per-client-IP token bucket (Traefik's default source is the connection's remote address).
+      # One install sends one report a day, so this only bites scripted abuse.
+      traefik.http.middlewares.icey-stats-rate.ratelimit.average: "30"
+      traefik.http.middlewares.icey-stats-rate.ratelimit.period: 1m
+      traefik.http.middlewares.icey-stats-rate.ratelimit.burst: "60"
+      # Defense in depth for the app's own limits (4 KB report, 1 KB hit, 1 MB GitHub snapshot).
+      traefik.http.middlewares.icey-stats-body.buffering.maxRequestBodyBytes: "1048576"
+volumes:
+  data:
+    # A fixed name, independent of the Dokploy app name, so backups and restores have a stable path:
+    # /var/lib/docker/volumes/icey-stats-data/_data
+    name: icey-stats-data
+networks:
+  dokploy-network:
+    external: true
