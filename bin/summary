@@ -1,0 +1,9 @@
+#!/bin/sh
+# Aggregate production statistics as JSON (reports per day, OS versions, models, CPUs, app versions,
+# feature adoption, page hits, downloads per release).
+#   bin/summary            # last 30 days
+#   bin/summary 7          # last 7 days
+set -eu
+days=${1:-30}
+case $days in *[!0-9]*|'') echo "usage: bin/summary [days]" >&2; exit 2 ;; esac
+exec "$(dirname "$0")/_remote-admin" summary --days "$days" </dev/null

@@ -1,0 +1,13 @@
+#!/bin/sh
+# Run one read-only SQL statement (SELECT, WITH, DESCRIBE, SUMMARIZE, SHOW) against production.
+#   bin/query "SELECT os_version, count(*) FROM reports GROUP BY ALL ORDER BY 2 DESC"
+#   bin/query --json "SUMMARIZE reports"
+#   bin/query < query.sql
+set -eu
+json=
+if [ "${1:-}" = "--json" ]; then json=--json; shift; fi
+if [ $# -gt 0 ]; then
+  printf '%s\n' "$*" | "$(dirname "$0")/_remote-admin" query $json
+else
+  "$(dirname "$0")/_remote-admin" query $json
+fi

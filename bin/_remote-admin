@@ -1,0 +1,18 @@
+#!/bin/sh
+# Run `python -m icey_stats.admin <args>` inside the running icey-stats container over SSH.
+# The admin listener only binds 127.0.0.1 inside the container, so there is no admin token anywhere.
+# Server: $ICEY_STATS_SERVER, else "server" from deploy/target.json.
+set -eu
+root=$(cd "$(dirname "$0")/.." && pwd)
+server=${ICEY_STATS_SERVER:-$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["server"])' "$root/deploy/target.json")}
+for arg in "$@"; do
+  case $arg in
+    *[!A-Za-z0-9_-]*) echo "bin: unsupported argument: $arg" >&2; exit 2 ;;
+  esac
+done
+# One SSH round trip: find exactly one container of this app, then exec the admin client in it.
+# SQL travels on stdin, so it is never quoted through two shells.
+exec ssh -o BatchMode=yes -o ConnectTimeout=15 "$server" "
+  ids=\$(docker ps --filter label=com.docker.compose.service=icey-stats --filter label=org.opencontainers.image.title=icey-stats --format '{{.ID}}')
+  [ \$(printf '%s\n' \"\$ids\" | grep -c .) -eq 1 ] || { echo 'expected exactly one running icey-stats container' >&2; exit 1; }
+  exec docker exec -i \"\$ids\" python -m icey_stats.admin $*"
