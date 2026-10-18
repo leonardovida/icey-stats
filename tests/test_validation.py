@@ -49,6 +49,16 @@ def test_garbage_is_rejected(payload: object) -> None:
         ("app_version", "latest"),
         ("app_version", "1.2.3.4.5"),
         ("app_version", "0.14.0" + "x" * 40),
+    ],
+)
+def test_invalid_required_fields_are_rejected(field: str, value: object) -> None:
+    with pytest.raises(ValidationError):
+        validate_report(report(**{field: value}))
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
         ("build", -1),
         ("build", 1.5),
         ("build", "140"),
@@ -75,22 +85,34 @@ def test_garbage_is_rejected(payload: object) -> None:
         ("language", "pt_BR"),
         ("language", "en-US-x-private"),
         ("features", []),
-        ("features", {"LaunchAtLogin": True}),
-        ("features", {"launch_at_login": True}),
-        ("features", {"launchAtLogin": "true"}),
-        ("features", {f"flag{i}": True for i in range(33)}),
-        ("features", {"a" + "b" * 41: True}),
-        ("settings", {"spacing": "x" * 33}),
-        ("settings", {"spacing": "has space"}),
-        ("settings", {"spacing": 10**7}),
-        ("settings", {"spacing": None}),
-        ("settings", {"spacing": ["a"]}),
-        ("settings", {f"s{i}": "a" for i in range(17)}),
+        ("features", "on"),
+        ("settings", []),
     ],
 )
-def test_invalid_known_fields_are_rejected(field: str, value: object) -> None:
-    with pytest.raises(ValidationError):
-        validate_report(report(**{field: value}))
+def test_invalid_optional_fields_are_dropped(field: str, value: object) -> None:
+    out = validate_report(report(**{field: value}))
+    assert out[field] is None
+    assert out["app_version"] == "0.14.0"
+
+
+@pytest.mark.parametrize(
+    "field,value,expected",
+    [
+        ("features", {"LaunchAtLogin": True, "useIceBar": True}, {"useIceBar": True}),
+        ("features", {"launch_at_login": True}, {}),
+        ("features", {"launchAtLogin": "true"}, {}),
+        ("features", {f"flag{i}": True for i in range(33)}, {f"flag{i}": True for i in range(32)}),
+        ("features", {"a" + "b" * 41: True}, {}),
+        ("settings", {"spacing": "x" * 33, "rehide": "smart"}, {"rehide": "smart"}),
+        ("settings", {"spacing": "has space"}, {}),
+        ("settings", {"spacing": 10**7}, {}),
+        ("settings", {"spacing": None}, {}),
+        ("settings", {"spacing": ["a"]}, {}),
+        ("settings", {f"s{i}": "a" for i in range(17)}, {f"s{i}": "a" for i in range(16)}),
+    ],
+)
+def test_invalid_entries_are_dropped(field: str, value: object, expected: dict) -> None:
+    assert validate_report(report(**{field: value}))[field] == expected
 
 
 @pytest.mark.parametrize("model", ["Mac15,10", "VirtualMac2,1", "MacBookPro18,3", "iMac21,1", "Macmini9,1"])

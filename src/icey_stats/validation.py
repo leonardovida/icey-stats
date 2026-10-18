@@ -1,8 +1,9 @@
 """Strict validation of every public payload.
 
 Validators take already-decoded JSON and return plain, normalized dictionaries that contain only the
-fields the service stores. Unknown top-level fields are dropped. A known field with a wrong type or an
-out-of-range value raises ValidationError, which the HTTP layer turns into a 400.
+fields the service stores. Unknown top-level fields are dropped. In a report, an optional field with a
+wrong type or an out-of-range value is dropped too, while a bad schema or app_version raises
+ValidationError, which the HTTP layer turns into a 400. Hits and GitHub snapshots are rejected whole.
 """
 
 from __future__ import annotations
@@ -83,68 +84,80 @@ def validate_report(data: Any) -> dict[str, Any]:
     if app_version is None:
         raise ValidationError("app_version is required")
 
-    cpu_arch = data.get("cpu_arch")
-    if cpu_arch is not None and cpu_arch not in CPU_ARCHES:
-        raise ValidationError("cpu_arch must be arm64 or x86_64")
-
-    cpu_brand = data.get("cpu_brand")
-    if cpu_brand is not None:
-        if not isinstance(cpu_brand, str) or len(cpu_brand) > 64 or not PRINTABLE_ASCII.fullmatch(cpu_brand):
-            raise ValidationError("cpu_brand is not valid")
-        cpu_brand = cpu_brand.strip() or None
-
-    has_notch = data.get("has_notch")
-    if has_notch is not None and not isinstance(has_notch, bool):
-        raise ValidationError("has_notch must be a boolean")
+    def optional(validate: Any) -> Any:
+        # An optional field that fails validation is dropped, not the whole report, so a bug in one
+        # app version can't lose that day's report.
+        try:
+            return validate()
+        except ValidationError:
+            return None
 
     return {
         "schema": schema,
         "app_version": app_version,
-        "build": _int_field(data, "build", 0, 2_000_000_000),
-        "os_version": _pattern_field(data, "os_version", OS_VERSION, 16),
-        "model": _pattern_field(data, "model", MODEL, 32),
-        "cpu_arch": cpu_arch,
-        "cpu_brand": cpu_brand,
-        "cpu_cores": _int_field(data, "cpu_cores", 1, 256),
-        "memory_gb": _int_field(data, "memory_gb", 1, 4096),
-        "display_count": _int_field(data, "display_count", 0, 16),
-        "has_notch": has_notch,
-        "language": _pattern_field(data, "language", LANGUAGE, 10),
-        "features": _features(data.get("features")),
-        "settings": _settings(data.get("settings")),
+        "build": optional(lambda: _int_field(data, "build", 0, 2_000_000_000)),
+        "os_version": optional(lambda: _pattern_field(data, "os_version", OS_VERSION, 16)),
+        "model": optional(lambda: _pattern_field(data, "model", MODEL, 32)),
+        "cpu_arch": optional(lambda: _cpu_arch(data.get("cpu_arch"))),
+        "cpu_brand": optional(lambda: _cpu_brand(data.get("cpu_brand"))),
+        "cpu_cores": optional(lambda: _int_field(data, "cpu_cores", 1, 256)),
+        "memory_gb": optional(lambda: _int_field(data, "memory_gb", 1, 4096)),
+        "display_count": optional(lambda: _int_field(data, "display_count", 0, 16)),
+        "has_notch": optional(lambda: _bool(data.get("has_notch"), "has_notch")),
+        "language": optional(lambda: _pattern_field(data, "language", LANGUAGE, 10)),
+        "features": optional(lambda: _features(data.get("features"))),
+        "settings": optional(lambda: _settings(data.get("settings"))),
     }
+
+
+def _cpu_arch(value: Any) -> str | None:
+    if value is not None and value not in CPU_ARCHES:
+        raise ValidationError("cpu_arch must be arm64 or x86_64")
+    return value
+
+
+def _cpu_brand(value: Any) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or len(value) > 64 or not PRINTABLE_ASCII.fullmatch(value):
+        raise ValidationError("cpu_brand is not valid")
+    return value.strip() or None
+
+
+def _bool(value: Any, name: str) -> bool | None:
+    if value is not None and not isinstance(value, bool):
+        raise ValidationError(f"{name} must be a boolean")
+    return value
 
 
 def _features(value: Any) -> dict[str, bool] | None:
     if value is None:
         return None
-    if not isinstance(value, dict) or len(value) > MAX_FEATURES:
-        raise ValidationError(f"features must be an object with at most {MAX_FEATURES} entries")
+    if not isinstance(value, dict):
+        raise ValidationError("features must be an object")
     out: dict[str, bool] = {}
     for key, flag in value.items():
-        if not FLAG_KEY.fullmatch(key) or not isinstance(flag, bool):
-            raise ValidationError("features must map camelCase keys to booleans")
-        out[key] = flag
+        # Invalid entries are dropped one by one, and only the first MAX_FEATURES are kept.
+        if len(out) < MAX_FEATURES and isinstance(key, str) and FLAG_KEY.fullmatch(key) and isinstance(flag, bool):
+            out[key] = flag
     return out
 
 
 def _settings(value: Any) -> dict[str, str] | None:
     if value is None:
         return None
-    if not isinstance(value, dict) or len(value) > MAX_SETTINGS:
-        raise ValidationError(f"settings must be an object with at most {MAX_SETTINGS} entries")
+    if not isinstance(value, dict):
+        raise ValidationError("settings must be an object")
     out: dict[str, str] = {}
     for key, setting in value.items():
-        if not FLAG_KEY.fullmatch(key):
-            raise ValidationError("settings keys must be camelCase")
+        if len(out) >= MAX_SETTINGS or not isinstance(key, str) or not FLAG_KEY.fullmatch(key):
+            continue
         if isinstance(setting, bool):
             out[key] = "true" if setting else "false"
         elif _is_int(setting) and -1_000_000 <= setting <= 1_000_000:
             out[key] = str(setting)
         elif isinstance(setting, str) and SETTING_VALUE.fullmatch(setting):
             out[key] = setting
-        else:
-            raise ValidationError("settings values must be short tokens, booleans or small integers")
     return out
 
 

@@ -27,7 +27,7 @@ This is the section to link from Icey's README.
 
 **What is never collected.** No identifier of any kind: no install ID, device ID, serial number, user name or host name. Icey sends no report ID, so one Mac's reports cannot be linked across days. Because each install sends at most one report a day, the number of reports on a day is roughly the number of active installs that day.
 
-**What the server keeps.** The fields above, plus the UTC **day** and **hour** the report arrived. The service never stores or logs IP addresses or user agents, and never stores exact timestamps. Fields it does not know are dropped before storage, and it rejects malformed reports.
+**What the server keeps.** The fields above, plus the UTC **day** and **hour** the report arrived. The service never stores or logs IP addresses or user agents, and never stores exact timestamps. Fields it does not know, and known fields with invalid values, are dropped before storage.
 
 **Website counter.** The pages at `leonardovida.github.io/icey` count page views and download clicks. A count holds the day, the page path, the referring site's host name (for example `news.ycombinator.com`, never the full URL) and the event. It is a counter per day, not a row per visit. No cookies, no IP addresses, no user agents.
 
@@ -49,7 +49,7 @@ Public, over HTTPS through Traefik. Traefik limits each client IP to an average 
 
 Validation rules:
 
-- Report: `schema` must be `1` and `app_version` must look like a version. Every other field is optional. A known field with the wrong type or an out-of-range value rejects the whole report with a message that names the field.
+- Report: `schema` must be `1` and `app_version` must look like a version. Every other field is optional. A known field with the wrong type or an out-of-range value is dropped, and so is each invalid entry in `features` and `settings`, so one bad field never loses the report.
 - Hit: `path` must match `^/icey(/[a-zA-Z0-9._-]*)*/?$` (120 characters at most), `ref` must be empty or a bare host name, and `event` defaults to `pageview`.
 - Snapshot: it must be for `leonardovida/icey`. The GitHub Actions job that sends it is in [docs/examples/icey-usage-stats.yml](docs/examples/icey-usage-stats.yml).
 
