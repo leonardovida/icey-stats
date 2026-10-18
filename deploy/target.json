@@ -2,7 +2,7 @@
   "repository": "leonardovida/icey-stats",
   "server": "root@178.105.139.229",
   "hostname": "icey-stats.178-105-139-229.sslip.io",
-  "composeId": null,
+  "composeId": "mbaCE0Zcyu3IUpb44_-mS",
   "projectName": "icey-stats",
   "githubSecretRepository": "leonardovida/icey"
 }
