@@ -112,9 +112,14 @@ Useful queries:
 SELECT received_day, count(*) FROM reports GROUP BY ALL ORDER BY 1;
 -- adoption of one feature in the last 30 days
 SELECT avg(features['launchAtLogin']::INT) FROM reports WHERE received_day > current_date - 30;
--- downloads per release, latest snapshot
-SELECT tag, sum(download_count) FROM release_downloads
-WHERE collected_day = (SELECT max(collected_day) FROM release_downloads) GROUP BY ALL ORDER BY 2 DESC;
+-- downloads per release, latest snapshot: DMG for new installs, zip for updates.
+-- appcast.xml counts update checks, not downloads, and SHA256SUMS.txt is left out.
+SELECT tag,
+       sum(download_count) FILTER (WHERE asset LIKE '%.dmg') AS installs,
+       sum(download_count) FILTER (WHERE asset LIKE '%.zip') AS updates,
+       sum(download_count) FILTER (WHERE asset = 'appcast.xml') AS update_checks
+FROM release_downloads
+WHERE collected_day = (SELECT max(collected_day) FROM release_downloads) GROUP BY ALL ORDER BY 2 DESC NULLS LAST;
 ```
 
 ## Development
