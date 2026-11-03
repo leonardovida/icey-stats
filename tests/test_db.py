@@ -167,6 +167,25 @@ def test_summary(db: Database) -> None:
     assert out["page_hits_per_day"][0]["hits"] == 1
 
 
+def test_summary_downloads_leave_out_update_checks(db: Database) -> None:
+    parsed, raw = snapshot()
+    parsed["downloads"] = {
+        ("v0.14.0", "Icey-0.14.0.dmg"): 40,
+        ("v0.14.0", "Icey-0.14.0.zip"): 15,
+        ("v0.14.0", "appcast.xml"): 44,
+        ("v0.14.0", "SHA256SUMS.txt"): 2,
+        ("v0.13.0", "appcast.xml"): 7,
+    }
+    db.ingest_github(parsed, raw)
+    rows = {r["tag"]: r for r in db.summary()["downloads_per_release"]}
+    assert rows["v0.14.0"]["installs"] == 40
+    assert rows["v0.14.0"]["updates"] == 15
+    assert rows["v0.14.0"]["downloads"] == 55
+    assert rows["v0.14.0"]["update_checks"] == 44
+    assert rows["v0.13.0"]["downloads"] == 0
+    assert rows["v0.13.0"]["installs"] is None
+
+
 # ------------------------------------------------------------------------------- read-only queries
 
 

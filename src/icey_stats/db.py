@@ -330,8 +330,17 @@ class Database:
                 [since],
             )
 
+        # GitHub counts every fetch of a release asset. Each installed copy fetches appcast.xml
+        # when it checks for updates, so it is reported as update checks, not downloads.
+        # Downloads are the DMG (new installs) and the zip (updates Sparkle installs).
+        # Other assets, such as SHA256SUMS.txt, are left out.
         latest_downloads = self._read(
-            """SELECT tag, sum(download_count) AS downloads, max(collected_day) AS collected_day
+            """SELECT tag,
+                      sum(download_count) FILTER (WHERE lower(asset) LIKE '%.dmg') AS installs,
+                      sum(download_count) FILTER (WHERE lower(asset) LIKE '%.zip') AS updates,
+                      coalesce(installs, 0) + coalesce(updates, 0) AS downloads,
+                      sum(download_count) FILTER (WHERE lower(asset) = 'appcast.xml') AS update_checks,
+                      max(collected_day) AS collected_day
                FROM release_downloads WHERE collected_day = (SELECT max(collected_day) FROM release_downloads)
                GROUP BY tag ORDER BY downloads DESC, tag"""
         )
